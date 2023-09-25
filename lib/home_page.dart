@@ -1,4 +1,10 @@
+import 'package:firebase_auth/firebase_auth.dart'
+    hide EmailAuthProvider, PhoneAuthProvider;
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+import 'app_state.dart';
+import 'src/authentication.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({Key? key}) : super(key: key);
@@ -8,81 +14,102 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  late int _cols;
-  late int _rows;
-  late List<List<int>> _squares;
-  int _currentPlayer = 1;
-  int _hoverCol = -1;
-  int _hoverRow = -1;
-  bool _anticipatingMove = false;
+  int hoverCol = -1;
 
   @override
   void initState() {
-    initSquares(7, 6);
     super.initState();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(centerTitle: true, title: const Text('Vier gewinnt')),
-      body: GestureDetector(
-        onTapDown: (_) {
-          setState(() {
-            _anticipatingMove = true;
-          });
-        },
-        onTapCancel: () {
-          setState(() {
-            _anticipatingMove = false;
-          });
-        },
-        onPanStart: (_) {
-          setState(() {
-            _anticipatingMove = true;
-          });
-        },
-        onPanEnd: (_) {
-          setState(() {
-            _anticipatingMove = false;
-          });
-          play(_hoverCol);
-        },
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: buildColumns(),
-        ),
-      ),
-    );
-  }
-
-  void initSquares(int cols, int rows) {
-    this._cols = cols;
-    this._rows = rows;
-    _squares = List.generate(
-        cols, (i) => List<int>.generate(rows, (index) => 0),
-        growable: false);
+    return Consumer<ApplicationState>(
+        builder: (context, appState, _) => Scaffold(
+            appBar: AppBar(
+                backgroundColor: appState.gameState.winner == -1
+                    ? Colors.yellow
+                    : (appState.gameState.winner == 1
+                        ? Colors.red
+                        : Colors.blue),
+                centerTitle: true,
+                title: Text(appState.gameState.winner == 0
+                    ? 'Vier gewinnt'
+                    : 'Player ${appState.gameState.winner == -1 ? "yellow" : "red"} wins!')),
+            body: ListView(
+              children: <Widget>[
+                Container(
+                  margin: EdgeInsets.all(10.0),
+                  child: GestureDetector(
+                    onTapDown: (_) {
+                      setState(() {
+                        appState.gameState.anticipatingMove = true;
+                      });
+                    },
+                    onTapCancel: () {
+                      setState(() {
+                        appState.gameState.anticipatingMove = false;
+                      });
+                    },
+                    onPanStart: (_) {
+                      setState(() {
+                        appState.gameState.anticipatingMove = true;
+                      });
+                    },
+                    onPanEnd: (_) {
+                      setState(() {
+                        appState.gameState.anticipatingMove = false;
+                        appState.gameState.play(hoverCol);
+                        print('onPanEnd');
+                        print('before set doc');
+                        appState.setVierGewinntState(appState.gameState);
+                        print('after set doc');
+                      });
+                    },
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: buildColumns(appState),
+                    ),
+                  ),
+                ),
+                Consumer<ApplicationState>(
+                  builder: (context, appState, _) => AuthFunc(
+                      loggedIn: appState.loggedIn,
+                      signOut: () {
+                        FirebaseAuth.instance.signOut();
+                      }),
+                ),
+              ],
+            )));
   }
 
   ({double x, double y}) squareSize() {
     return (x: 60.0, y: 60.0);
   }
 
-  Widget squareIcon(int col, int row) {
-    int squareState = _squares[col][row];
+  Widget squareIcon(int col, int row, ApplicationState appState) {
+    int squareState = appState.gameState.squares[col][row];
     switch (squareState) {
       case -1:
         return Icon(Icons.circle, color: Colors.yellow, size: squareSize().y);
       case 1:
         return Icon(Icons.circle, color: Colors.red, size: squareSize().y);
       default:
-        return Container();
+        bool showPreview =
+            col == hoverCol && row == appState.gameState.nextRow[hoverCol];
+        Color previewColor = appState.gameState.currentPlayer == -1
+            ? Colors.yellow.withOpacity(0.3)
+            : Colors.red.withOpacity(0.3);
+        return showPreview
+            ? Icon(Icons.circle, color: previewColor, size: squareSize().y)
+            : Container();
     }
   }
 
-  Widget squareWidget(int col, int row) {
+  Widget squareWidget(int col, int row, ApplicationState appState) {
     double getAlpha() {
-      return col == _hoverCol ? (_anticipatingMove ? 0.3 : 0.2) : 0.1;
+      return col == hoverCol
+          ? (appState.gameState.anticipatingMove ? 0.3 : 0.2)
+          : 0.1;
     }
 
     return Container(
@@ -94,58 +121,49 @@ class _HomePageState extends State<HomePage> {
           margin: EdgeInsets.all(1.0),
           color: Color.fromRGBO(0, 0, 0, getAlpha()),
         ),
-        squareIcon(col, row),
+        squareIcon(col, row, appState),
       ]),
     );
   }
 
-  bool play(int col) {
-    for (int i = 1; i <= _rows; i++) {
-      if (_squares[col][_rows - i] == 0) {
-        setState(() {
-          _squares[col][_rows - i] = _currentPlayer;
-          _currentPlayer *= -1;
-        });
-        return true;
-      }
-    }
-    return false;
-  }
-
-  List<Widget> buildColumns() {
+  List<Widget> buildColumns(ApplicationState appState) {
     List<Widget> rowWidgets = [];
-    for (int i = 0; i < _cols; i++) {
+    for (int i = 0; i < appState.gameState.cols; i++) {
       List<Widget> children = [];
-      for (int j = 0; j < _rows; j++) {
-        children.add(squareWidget(i, j));
+      for (int j = 0; j < appState.gameState.rows; j++) {
+        children.add(squareWidget(i, j, appState));
       }
       rowWidgets.add(MouseRegion(
-        onEnter: (_) {
-          setState(() {
-            _hoverCol = i;
-          });
-        },
-        onExit: (_) {
-          setState(() {
-            _hoverCol = -1;
-          });
-        },
-        child: InkWell(
-          onTap: () {
-            play(i);
+          onEnter: (_) {
+            setState(() {
+              hoverCol = i;
+            });
           },
-          child: Container(
-            height: squareSize().y * _rows,
-            child: Column(
-              children: children,
+          onExit: (_) {
+            setState(() {
+              hoverCol = -1;
+            });
+          },
+          child: Consumer<ApplicationState>(
+            builder: (context, appState, _) => InkWell(
+              onTap: () {
+                setState(() {
+                  appState.gameState.play(i);
+                  appState.setVierGewinntState(appState.gameState);
+                });
+              },
+              child: Container(
+                height: squareSize().y * appState.gameState.rows,
+                child: Column(
+                  children: children,
+                ),
+              ),
             ),
-          ),
-        ),
-      ));
+          )));
     }
     return rowWidgets;
   }
-
+//
 // @override
 // Widget build(BuildContext context) {
 //   return Scaffold(
